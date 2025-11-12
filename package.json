@@ -1,0 +1,26 @@
+{
+  "name": "mern-testing-app",
+  "version": "1.0.0",
+  "description": "MERN stack application with comprehensive testing and debugging",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "install-all": "npm install && npm --prefix client install && npm --prefix server install",
+    "test": "jest --coverage",
+    "test:unit": "jest --testPathPattern=unit --coverage",
+    "test:integration": "jest --testPathPattern=integration --coverage",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage --coverageReporters=html",
+    "start": "npm --prefix server start",
+    "dev": "concurrently \"npm --prefix client start\" \"npm --prefix server dev\"",
+    "build": "npm --prefix client build",
+    "setup-test-db": "node scripts/setupTestDb.js"
+  },
+  "devDependencies": {
+    "concurrently": "^7.6.0",
+    "jest": "^29.7.0"
+  }
+}
