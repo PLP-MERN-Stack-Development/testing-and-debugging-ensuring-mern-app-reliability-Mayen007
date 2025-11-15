@@ -25,3 +25,15 @@ dist-ssr
 
 # env files
 .env
+
+# Playwright Test Results
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Screenshots and Videos
+screenshots/
+videos/
+
+# Playwright state
+.auth/
