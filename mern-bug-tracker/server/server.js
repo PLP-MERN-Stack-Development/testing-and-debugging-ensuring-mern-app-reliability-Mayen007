@@ -7,11 +7,25 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
+const morgan = require('morgan');
+
+// Import logger and error handlers
+const logger = require('./config/logger');
+const {
+  errorHandler,
+  notFoundHandler,
+  handleUnhandledRejection,
+  handleUncaughtException
+} = require('./middleware/errorHandler');
 
 // Import routes
 const postRoutes = require('./routes/posts');
 const categoryRoutes = require('./routes/categories');
 const authRoutes = require('./routes/auth');
+
+// Handle uncaught exceptions and unhandled rejections
+handleUncaughtException();
+handleUnhandledRejection();
 
 // Load environment variables
 dotenv.config();
@@ -53,13 +67,20 @@ app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Log requests in development mode
-if (process.env.NODE_ENV === 'development') {
-  app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
-    next();
+// HTTP request logging with Morgan and Winston
+app.use(morgan('combined', { stream: logger.stream }));
+
+// Request timing middleware
+app.use((req, res, next) => {
+  const startTime = Date.now();
+
+  res.on('finish', () => {
+    const responseTime = Date.now() - startTime;
+    logger.logRequest(req, res.statusCode, responseTime);
   });
-}
+
+  next();
+});
 
 // API routes
 app.use('/api/posts', postRoutes);
@@ -68,37 +89,56 @@ app.use('/api/auth', express.json(), express.urlencoded({ extended: true }), aut
 
 // Root route
 app.get('/', (req, res) => {
-  res.send('MERN Blog API is running');
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(err.statusCode || 500).json({
-    success: false,
-    error: err.message || 'Server Error',
+  res.json({
+    message: 'MERN Blog API is running',
+    version: '1.0.0',
+    status: 'healthy'
   });
 });
+
+// Health check route
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+  });
+});
+
+// 404 handler - must be after all routes
+app.use(notFoundHandler);
+
+// Global error handler - must be last
+app.use(errorHandler);
 
 // Connect to MongoDB and start server
 mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => {
-    console.log('Connected to MongoDB');
-    app.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+    logger.info('Connected to MongoDB successfully');
+
+    const server = app.listen(PORT, () => {
+      logger.info(`Server running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+    });
+
+    // Graceful shutdown
+    process.on('SIGTERM', () => {
+      logger.info('SIGTERM signal received: closing HTTP server');
+      server.close(() => {
+        logger.info('HTTP server closed');
+        mongoose.connection.close(false, () => {
+          logger.info('MongoDB connection closed');
+          process.exit(0);
+        });
+      });
     });
   })
   .catch((err) => {
-    console.error('Failed to connect to MongoDB', err);
+    logger.error('Failed to connect to MongoDB:', { error: err.message, stack: err.stack });
     process.exit(1);
   });
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Promise Rejection:', err);
-  // Close server & exit process
-  process.exit(1);
+process.exit(1);
 });
 
 module.exports = app;
