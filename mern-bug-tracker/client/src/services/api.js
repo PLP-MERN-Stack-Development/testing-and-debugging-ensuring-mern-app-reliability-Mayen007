@@ -1,0 +1,230 @@
+// api.js - API service for making requests to the backend
+
+import axios from 'axios';
+
+// Get Vite's import.meta.env at runtime without referencing `import.meta` directly
+// (avoids parse errors under Jest while still working in Vite environments).
+const tryGetViteEnv = () => {
+  try {
+    // Use Function constructor to evaluate `import.meta.env` at runtime so
+    // the parser doesn't see the `import` token during static analysis.
+    // This will throw in environments where `import.meta` is unavailable.
+    // eslint-disable-next-line no-new-func
+    return new Function('return import.meta.env')();
+  } catch (e) {
+    return undefined;
+  }
+};
+
+// Get the base URL for API calls. Prefer `process.env` (Jest/Node), then Vite's
+// `import.meta.env`, then fall back to relative `/api`.
+const getBaseURL = () => {
+  if (typeof process !== 'undefined' && process.env && process.env.VITE_API_URL) {
+    return `${process.env.VITE_API_URL}/api`;
+  }
+
+  const viteEnv = tryGetViteEnv();
+  if (viteEnv && viteEnv.VITE_API_URL) {
+    return `${viteEnv.VITE_API_URL}/api`;
+  }
+
+  return '/api';
+};
+
+// Get the base URL for static assets (images)
+const getAssetBaseURL = () => {
+  if (typeof process !== 'undefined' && process.env && process.env.VITE_API_URL) {
+    return `${process.env.VITE_API_URL}`;
+  }
+
+  const viteEnv = tryGetViteEnv();
+  if (viteEnv && viteEnv.VITE_API_URL) {
+    return `${viteEnv.VITE_API_URL}`;
+  }
+
+  return '';
+};
+
+// Create axios instance with base URL
+const api = axios.create({
+  baseURL: getBaseURL(),
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Helper function to get full image URL
+export const getImageUrl = (imagePath) => {
+  if (!imagePath) return '';
+  if (imagePath.startsWith('http')) return imagePath; // Already a full URL
+  return `${getAssetBaseURL()}${imagePath}`;
+};
+
+// Add request interceptor for authentication
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Add response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Handle authentication errors
+    if (error.response && error.response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+
+    // Extract meaningful error message from response
+    let errorMessage = 'An error occurred';
+    if (error.response && error.response.data) {
+      if (error.response.data.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response.data.error) {
+        errorMessage = error.response.data.error;
+      } else if (typeof error.response.data === 'string') {
+        errorMessage = error.response.data;
+      } else if (error.response.data.errors && Array.isArray(error.response.data.errors)) {
+        errorMessage = error.response.data.errors.map(e => e.message || e).join(', ');
+      }
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+
+    // Create a new error with the extracted message
+    const customError = new Error(errorMessage);
+    customError.status = error.response?.status;
+    customError.data = error.response?.data;
+
+    return Promise.reject(customError);
+  }
+);
+
+// Post API services
+export const postService = {
+  // Get all posts with optional pagination and filters
+  getAllPosts: async (page = 1, limit = 10, category = null) => {
+    let url = `/posts?page=${page}&limit=${limit}`;
+    if (category) {
+      url += `&category=${category}`;
+    }
+    const response = await api.get(url);
+    return response.data;
+  },
+
+  // Get current user's posts (includes drafts)
+  getMyPosts: async () => {
+    const response = await api.get('/posts/my-posts');
+    return response.data;
+  },
+
+  // Get a single post by ID or slug
+  getPost: async (idOrSlug) => {
+    const response = await api.get(`/posts/${idOrSlug}`);
+    return response.data;
+  },
+
+  // Create a new post
+  createPost: async (postData) => {
+    // For FormData, let axios set Content-Type automatically
+    const config = postData instanceof FormData ? { headers: { 'Content-Type': undefined } } : {};
+    const response = await api.post('/posts', postData, config);
+    return response.data;
+  },
+
+  // Update an existing post
+  updatePost: async (id, postData) => {
+    // For FormData, let axios set Content-Type automatically
+    const config = postData instanceof FormData ? { headers: { 'Content-Type': undefined } } : {};
+    const response = await api.put(`/posts/${id}`, postData, config);
+    return response.data;
+  },
+
+  // Delete a post
+  deletePost: async (id) => {
+    const response = await api.delete(`/posts/${id}`);
+    return response.data;
+  },
+
+  // Publish or unpublish a post
+  publishPost: async (id, isPublished) => {
+    const response = await api.patch(`/posts/${id}/publish`, { isPublished });
+    return response.data;
+  },
+
+  // Add a comment to a post
+  addComment: async (postId, commentData) => {
+    const response = await api.post(`/posts/${postId}/comments`, commentData);
+    return response.data;
+  },
+
+  // Get comments for a post
+  getComments: async (postId) => {
+    const response = await api.get(`/posts/${postId}/comments`);
+    return response.data;
+  },
+
+  // Search posts
+  searchPosts: async (query) => {
+    const response = await api.get(`/posts/search?q=${query}`);
+    return response.data;
+  },
+};
+
+// Category API services
+export const categoryService = {
+  // Get all categories
+  getAllCategories: async () => {
+    const response = await api.get('/categories');
+    return response.data;
+  },
+
+  // Create a new category
+  createCategory: async (categoryData) => {
+    const response = await api.post('/categories', categoryData);
+    return response.data;
+  },
+};
+
+// Auth API services
+export const authService = {
+  // Register a new user
+  register: async (userData) => {
+    const response = await api.post('/auth/register', userData);
+    return response.data;
+  },
+
+  // Login user
+  login: async (credentials) => {
+    const response = await api.post('/auth/login', credentials);
+    if (response.data.token) {
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+    }
+    return response.data;
+  },
+
+  // Logout user
+  logout: () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  },
+
+  // Get current user
+  getCurrentUser: () => {
+    const user = localStorage.getItem('user');
+    return user ? JSON.parse(user) : null;
+  },
+};
+
+export default api;
